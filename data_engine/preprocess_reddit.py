@@ -285,6 +285,41 @@ class RedditPreprocessor:
         
         return cities
     
+    def _extract_state_mentioned(self, text: str) -> Optional[str]:
+        """
+        Extract the most prominent US state abbreviation from text.
+        Returns the first state code found (e.g., 'TX', 'CA', 'FL').
+        """
+        if not text:
+            return None
+        # Match state codes that appear after common location prepositions or standalone
+        pattern = r'\b(in|to|from|near|around|moving to|relocating to|buying in)\s+(?:[A-Z][a-z]+,?\s+)?([A-Z]{2})\b'
+        match = re.search(pattern, text, re.IGNORECASE)
+        if match:
+            state = match.group(2).upper()
+            if state in self.us_states:
+                return state
+        # Fallback: "City, ST" pattern
+        pattern2 = r'\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*,\s*([A-Z]{2})\b'
+        match2 = re.search(pattern2, text)
+        if match2:
+            state = match2.group(1).upper()
+            if state in self.us_states:
+                return state
+        return None
+
+    def _format_top_comments(self, post: Dict) -> str:
+        """
+        Format top_comments list from raw post dict into a concatenated string for BQ storage.
+        Returns empty string if no comments available.
+        """
+        comments = post.get('top_comments', [])
+        if not comments:
+            return ''
+        # Join with separator, truncate to 2000 chars to avoid BQ row size issues
+        joined = ' | '.join(c.strip().replace('\n', ' ') for c in comments if c.strip())
+        return joined[:2000]
+
     def process_firsttimehomebuyer_post(self, post: Dict) -> Dict:
         """
         Process a single r/FirstTimeHomeBuyer post
@@ -316,7 +351,9 @@ class RedditPreprocessor:
             'author': post.get('author', '[deleted]'),
             'location': location,
             'purchase_price': purchase_price,
-            'city_mentions': None,  # Not used for this subreddit
+            'city_mentions': None,
+            'top_comments_text': self._format_top_comments(post),
+            'state_mentioned': self._extract_state_mentioned(full_text),
             'permalink': f"https://reddit.com{post.get('permalink', '')}"
         }
     
@@ -348,12 +385,41 @@ class RedditPreprocessor:
             'score': post.get('score', 0),
             'num_comments': post.get('num_comments', 0),
             'author': post.get('author', '[deleted]'),
-            'location': None,  # Not used for this subreddit
-            'purchase_price': None,  # Not used for this subreddit
-            'city_mentions': '|'.join(city_mentions) if city_mentions else None,  # Pipe-separated
+            'location': None,
+            'purchase_price': None,
+            'city_mentions': '|'.join(city_mentions) if city_mentions else None,
+            'top_comments_text': self._format_top_comments(post),
+            'state_mentioned': self._extract_state_mentioned(full_text),
             'permalink': f"https://reddit.com{post.get('permalink', '')}"
         }
     
+    def process_generic_post(self, post: Dict, subreddit: str) -> Dict:
+        """
+        Generic processor for new subreddits (RealEstate, realestateinvesting, personalfinance, moving).
+        Extracts city mentions and state for AI context.
+        """
+        title = self.normalize_text(post.get('title', ''))
+        selftext = self.normalize_text(post.get('selftext', ''))
+        full_text = f"{title}\n\n{selftext}"
+        city_mentions = self.extract_city_mentions(full_text)
+        return {
+            'post_id': post.get('id'),
+            'subreddit': subreddit,
+            'created_utc': post.get('created_utc'),
+            'created_date': datetime.fromtimestamp(post.get('created_utc', 0)).strftime('%Y-%m-%d'),
+            'title': title,
+            'selftext': selftext,
+            'score': post.get('score', 0),
+            'num_comments': post.get('num_comments', 0),
+            'author': post.get('author', '[deleted]'),
+            'location': self.extract_location(full_text),
+            'purchase_price': self.extract_price(full_text),
+            'city_mentions': '|'.join(city_mentions) if city_mentions else None,
+            'top_comments_text': self._format_top_comments(post),
+            'state_mentioned': self._extract_state_mentioned(full_text),
+            'permalink': f"https://reddit.com{post.get('permalink', '')}"
+        }
+
     def process_subreddit(self, subreddit: str) -> pd.DataFrame:
         """
         Process all posts from a subreddit
@@ -394,7 +460,8 @@ class RedditPreprocessor:
             elif subreddit == 'SameGrassButGreener':
                 processed = self.process_samegrassbutgreener_post(post)
             else:
-                continue
+                # Generic processor for new subreddits
+                processed = self.process_generic_post(post, subreddit)
             
             processed_posts.append(processed)
         
@@ -446,7 +513,14 @@ class RedditPreprocessor:
         # Sort by created_utc
         combined_df = combined_df.sort_values('created_utc')
         
-        # Save to CSV with RFC 4180 standard quoting for BigQuery compatibility
+        # Ensure new columns exist with empty string default (for BQ schema compatibility)
+        for col in ['top_comments_text', 'state_mentioned']:
+            if col not in combined_df.columns:
+                combined_df[col] = ''
+            else:
+                combined_df[col] = combined_df[col].fillna('')
+        
+        # Save to CSV
         # Use doublequote (quotes within quotes are escaped as "") instead of backslash
         output_file = self.processed_dir / 'reddit_posts.csv'
         combined_df.to_csv(

@@ -50,15 +50,15 @@ gcloud builds submit --tag $IMAGE_NAME
 # Deploy to Cloud Run
 Write-Host "Deploying to Cloud Run..." -ForegroundColor Cyan
 gcloud run deploy $SERVICE_NAME `
-  --image $IMAGE_NAME `
-  --platform managed `
-  --region $REGION `
-  --allow-unauthenticated `
-  --memory 1Gi `
-  --cpu 1 `
-  --timeout 300 `
-  --max-instances 10 `
-  --set-env-vars "GCP_PROJECT_ID=$PROJECT_ID,GCP_DATASET_ID=$env:GCP_DATASET_ID"
+    --image $IMAGE_NAME `
+    --platform managed `
+    --region $REGION `
+    --allow-unauthenticated `
+    --memory 1Gi `
+    --cpu 1 `
+    --timeout 300 `
+    --max-instances 10 `
+    --set-env-vars "GCP_PROJECT_ID=$PROJECT_ID,GCP_DATASET_ID=$env:GCP_DATASET_ID,PIPELINE_SECRET=$env:PIPELINE_SECRET"
 
 # Get the service URL
 $SERVICE_URL = gcloud run services describe $SERVICE_NAME --region $REGION --format='value(status.url)'

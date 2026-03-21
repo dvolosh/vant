@@ -1,117 +1,93 @@
-# Data Engine - Setup Guide
+# Data Engine - ETL & Intelligence Pipeline
 
 ## Overview
-This directory contains scripts for processing Zillow housing data and uploading it to BigQuery.
+This directory contains the core data pipelines and AI integration logic for the Housing Dashboard. It handles ingesting raw data from various sources, preprocessing it, storing it in Google BigQuery, and interacting with Vertex AI for market intelligence.
+
+## Architecture Pipeline
+
+1. **Ingestion (`fetch_*.py`)**: Pulls raw data from APIs (FRED, PullPush for Reddit, Google Trends) and saves as JSON/CSV in `*_raw/` folders. Zillow data is manually downloaded monthly as CSV.
+2. **Preprocessing (`preprocess_*.py`)**: Cleans, normalizes, and enriches data (e.g., coordinate mapping, text extraction), saving as optimized Parquet files in `*_processed/` folders.
+3. **Storage (`upload_*_to_bigquery.py`)**: Loads processed data into BigQuery tables with appropriate schemas, partitioning, and clustering.
+4. **Intelligence (`generate_insights.py`)**: Queries BigQuery to build market context, prompts Vertex AI Gemini, and caches audience-specific Weekly Briefings securely back into BigQuery.
 
 ## Setup Instructions
 
 ### 1. Install Dependencies
+Ensure you have the required Python packages:
 ```powershell
 pip install -r requirements.txt
 ```
 
 ### 2. Configure Environment Variables
-
-Copy the example environment file:
-```powershell
-cp .env.example .env
-```
-
-Edit `.env` and set your credentials:
+Copy `.env.example` to `.env` and set your credentials:
 ```env
-# Required for BigQuery upload
 GCP_PROJECT_ID=your-gcp-project-id
-GCP_DATASET_ID=housing_data
-GCP_TABLE_ID=zillow_metrics
+GCP_DATASET_ID=db
 
-# Optional: Service account key path
-# GOOGLE_APPLICATION_CREDENTIALS=path/to/service-account-key.json
+# AI Configuration
+GEMINI_MODEL=gemini-1.5-flash
+VERTEX_LOCATION=us-central1
+MAX_QA_PER_DAY=5
 
-# For future FRED API integration
-FRED_API_KEY=your_fred_api_key_here
-
-# For future Reddit API integration
-REDDIT_CLIENT_ID=your_reddit_client_id_here
-REDDIT_CLIENT_SECRET=your_reddit_client_secret_here
+# Pipeline Security
+PIPELINE_SECRET=your_secure_secret_here
 ```
 
-### 3. Authenticate with Google Cloud
-
-**Option 1: Using gcloud CLI (Recommended)**
+### 3. BigQuery Setup
+Initialize all required tables (if not already created):
 ```powershell
-# Install gcloud CLI from: https://cloud.google.com/sdk/docs/install
+# Create base metrics tables
+python upload_to_bigquery.py        # Zillow
+python upload_fred_to_bigquery.py   # FRED
+python upload_trends_to_bigquery.py # Google Trends
+python upload_reddit_to_bigquery.py # Reddit
 
-# Authenticate
-gcloud auth application-default login
-
-# Set your project
-gcloud config set project your-gcp-project-id
+# Create AI cache & log tables
+python generate_insights.py --create-tables
 ```
 
-**Option 2: Using Service Account Key**
-```powershell
-# Download service account key from GCP Console
-# Set the path in .env file:
-GOOGLE_APPLICATION_CREDENTIALS=path/to/service-account-key.json
-```
+## Running Pipelines Locally
 
-## Usage
+You can run individual pipeline steps manually. For fully automated updates, the dashboard's `/api/run-pipeline` endpoint orchestrates the daily Reddit and Google Trends updates using Cloud Scheduler.
 
-### Preprocess Zillow Data
-Transform raw CSV files into normalized Parquet format:
+### Zillow & FRED (Monthly)
 ```powershell
 python preprocess_zillow.py
-```
-
-**Output:** `zillow_processed/zillow_combined.parquet`
-
-### Upload to BigQuery
-Upload processed data to BigQuery:
-```powershell
 python upload_to_bigquery.py
+
+python fetch_fred.py
+python preprocess_fred.py
+python upload_fred_to_bigquery.py
 ```
 
-This will:
-- Create the BigQuery table (if it doesn't exist)
-- Upload all data with partitioning and clustering
-- Run validation queries
-
-## File Structure
-
-```
-data_engine/
-├── .env                    # Your credentials (not in git)
-├── .env.example            # Template for credentials
-├── .gitignore              # Prevents committing secrets
-├── requirements.txt        # Python dependencies
-├── README.md               # This file
-├── preprocess_zillow.py    # Data transformation script
-├── upload_to_bigquery.py   # BigQuery upload script
-├── create_bq_schema.sql    # Schema definition
-├── zillow_raw/             # Original CSV files
-└── zillow_processed/       # Processed Parquet files
-```
-
-## Security Notes
-
-⚠️ **Never commit `.env` or service account keys to git!**
-
-The `.gitignore` file is configured to exclude:
-- `.env` files
-- `*.json` credential files
-- Python cache files
-
-## Troubleshooting
-
-### Authentication Errors
-If you see `DefaultCredentialsError`:
-1. Make sure you've run `gcloud auth application-default login`
-2. Or set `GOOGLE_APPLICATION_CREDENTIALS` in `.env`
-
-### Missing Dependencies
+### Google Trends & Reddit (Daily/Weekly)
 ```powershell
-pip install -r requirements.txt
+# Trends
+python fetch_trends.py
+python preprocess_trends.py
+python upload_trends_to_bigquery.py
+
+# Reddit
+python fetch_reddit.py
+python preprocess_reddit.py
+python upload_reddit_to_bigquery.py
 ```
 
-### Environment Variables Not Loading
-Make sure your `.env` file is in the `data_engine/` directory and contains valid values.
+### AI Intelligence (Vertex AI)
+You can test the AI briefing logic locally via the CLI:
+```powershell
+# Generate a briefing for homebuyers
+python generate_insights.py --audience homebuyer
+
+# Perform a dry-run (builds BQ context but skips Gemini API call)
+python generate_insights.py --audience re_investor --dry-run
+
+# Test the Q&A fallback system
+python generate_insights.py --qa "What markets look stressed?" --audience homebuyer
+```
+
+## Security & Maintenance
+- **Never commit `.env` or service account keys to git.**
+- BigQuery schemas are defined in the `create_*_schema.sql` files.
+- The Reddit pipeline uses the free PullPush API to avoid Reddit API rate limits and credential management. 
+- AI Briefings use caching (`ai_insights` table) to heavily reduce Vertex AI costs on repeated dashboard loads.

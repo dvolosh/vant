@@ -42,13 +42,35 @@ class RedditFetcher:
             'name': 'r/SameGrassButGreener',
             'description': 'City comparison and relocation discussions',
             'focus': 'Extract city mentions for sentiment and recommendations'
+        },
+        'RealEstate': {
+            'name': 'r/RealEstate',
+            'description': 'General real estate investor discussions',
+            'focus': 'Market trends, investment signals, geographic mentions'
+        },
+        'realestateinvesting': {
+            'name': 'r/realestateinvesting',
+            'description': 'Real estate investor community - deals, strategies, markets',
+            'focus': 'Investment strategies, distress signals, market opportunities'
+        },
+        'personalfinance': {
+            'name': 'r/personalfinance',
+            'description': 'Personal finance discussions including home buying',
+            'focus': 'Affordability concerns, mortgage discussion, buy vs rent sentiment'
+        },
+        'moving': {
+            'name': 'r/moving',
+            'description': 'Relocation discussions and destination recommendations',
+            'focus': 'Migration patterns, geographic demand signals'
         }
     }
     
     BASE_URL = 'https://api.pullpush.io/reddit/search/submission/'
+    COMMENTS_URL = 'https://api.pullpush.io/reddit/search/comment/'
     RATE_LIMIT_DELAY = 1.0  # 1 second between requests (60 req/min limit)
     MAX_RETRIES = 3
     BACKOFF_FACTOR = 2
+    MAX_COMMENTS_PER_POST = 5  # Top comments to store for AI context
     
     def __init__(self, raw_dir: str):
         """
@@ -70,21 +92,24 @@ class RedditFetcher:
             time.sleep(self.RATE_LIMIT_DELAY - elapsed)
         self.last_request_time = time.time()
     
-    def _make_request(self, params: Dict, retry_count: int = 0) -> List[Dict]:
+    def _make_request(self, params: Dict, retry_count: int = 0, url: Optional[str] = None) -> List[Dict]:
         """
         Make API request with rate limiting and error handling
         
         Args:
             params: Query parameters
             retry_count: Current retry attempt
+            url: Optional override URL (defaults to BASE_URL)
             
         Returns:
-            List of submissions
+            List of submissions or comments
         """
         self._rate_limit()
         
+        request_url = url or self.BASE_URL
+        
         try:
-            response = requests.get(self.BASE_URL, params=params, timeout=30)
+            response = requests.get(request_url, params=params, timeout=30)
             response.raise_for_status()
             
             data = response.json()
@@ -101,10 +126,33 @@ class RedditFetcher:
                 wait_time = self.BACKOFF_FACTOR ** retry_count
                 logger.warning(f"Request failed: {e}. Retrying in {wait_time}s...")
                 time.sleep(wait_time)
-                return self._make_request(params, retry_count + 1)
+                return self._make_request(params, retry_count + 1, url=url)
             else:
                 logger.error(f"API request failed after {self.MAX_RETRIES} retries: {e}")
                 raise
+
+    def fetch_comments(self, post_id: str) -> List[str]:
+        """
+        Fetch top comments for a given post via PullPush comments endpoint.
+        Returns a list of comment body strings (up to MAX_COMMENTS_PER_POST).
+        Silently returns [] on failure to avoid breaking the main fetch loop.
+        """
+        try:
+            params = {
+                'link_id': f't3_{post_id}',
+                'size': self.MAX_COMMENTS_PER_POST,
+                'sort': 'desc',
+                'sort_type': 'score',
+            }
+            comments = self._make_request(params, url=self.COMMENTS_URL)
+            return [
+                c.get('body', '') for c in comments
+                if c.get('body') and c.get('body') not in ('[deleted]', '[removed]')
+            ][:self.MAX_COMMENTS_PER_POST]
+        except Exception as e:
+            logger.debug(f"Could not fetch comments for {post_id}: {e}")
+            return []
+
     
     def get_last_fetch_date(self, subreddit: str) -> Optional[int]:
         """
@@ -276,6 +324,15 @@ class RedditFetcher:
         if not all_posts:
             logger.info("  No new posts")
             return
+        
+        # Fetch top comments for posts that have them (≥3 comments)
+        # This enriches AI context without over-fetching for low-engagement posts
+        posts_with_comments = [p for p in all_posts if p.get('num_comments', 0) >= 3]
+        logger.info(f"  Fetching comments for {len(posts_with_comments)} posts with ≥3 comments...")
+        for post in posts_with_comments:
+            post_id = post.get('id')
+            if post_id:
+                post['top_comments'] = self.fetch_comments(post_id)
         
         # Save posts
         metadata = {
