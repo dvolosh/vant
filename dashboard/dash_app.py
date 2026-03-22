@@ -1807,7 +1807,7 @@ def generate_briefing_callback(n_clicks, audience):
         ], style={'marginBottom': '1rem'}),
 
         # Narrative
-        html.Div(
+        dcc.Markdown(
             result.get('narrative', ''),
             style={'color': 'rgba(237,237,237,0.88)', 'lineHeight': '1.75', 'fontSize': '0.92rem',
                    'whiteSpace': 'pre-wrap', 'marginBottom': '1rem'}
