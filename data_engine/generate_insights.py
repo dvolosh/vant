@@ -45,7 +45,7 @@ logger = logging.getLogger(__name__)
 PROJECT_ID = os.getenv('GCP_PROJECT_ID', 'vant-486316')
 DATASET_ID = os.getenv('GCP_DATASET_ID', 'db')
 MAX_QA_PER_DAY = int(os.getenv('MAX_QA_PER_DAY', '5'))
-GEMINI_MODEL = os.getenv('GEMINI_MODEL', 'gemini-1.5-flash')
+GEMINI_MODEL = os.getenv('GEMINI_MODEL', 'gemini-2.5-flash')
 VERTEX_LOCATION = os.getenv('VERTEX_LOCATION', 'us-central1')
 
 AUDIENCE_LABELS = {
@@ -77,7 +77,7 @@ def create_tables(client: bigquery.Client):
 
     for stmt in sql.split(';'):
         stmt = stmt.strip()
-        if not stmt or stmt.startswith('--'):
+        if not stmt:
             continue
         stmt = stmt.replace('{project_id}', PROJECT_ID).replace('{dataset_id}', DATASET_ID)
         try:
@@ -234,21 +234,15 @@ def build_prompt(context: Dict[str, Any], audience: str) -> str:
 
 ## Your Task
 
-Based on the data above, provide a housing market briefing with:
+Based on the data above, provide a housing market briefing.
 
-1. **Composite Stress Index Reading**: Interpret the CSI score ({context.get('composite_stress_index', 'N/A')}/100).
-   - 0–30: Low stress (seller's market)
-   - 31–55: Moderate stress  
-   - 56–75: Elevated stress
-   - 76–100: High distress
+First, write 2–3 paragraphs of **Market Narrative** explaining what the Google Trends signals and Reddit conversations tell us about the current market. Keep the response under 300 words. Be direct and actionable — avoid hedging language. Do NOT include section titles like "1. Market Narrative" or mention the CSI again.
 
-2. **Market Narrative** (2–3 paragraphs): What do the Google Trends signals and Reddit conversations tell us about the current market? Be specific about which signals are moving and what they imply.
+Then, on a new line, write exactly:
+SENTIMENT: [BULLISH, NEUTRAL, or BEARISH]
 
-3. **Key Themes** (3–5 bullet points): The most actionable takeaways for a {AUDIENCE_LABELS.get(audience, audience)}.
-
-4. **Sentiment**: End with a single word: BULLISH, NEUTRAL, or BEARISH overall for this audience.
-
-Keep the total response under 400 words. Be direct and actionable — avoid hedging language.
+Then, on a new line, write exactly:
+THEMES: [Comma-separated list of 3-5 short tags/phrases, max 3 words each]
     """.strip()
 
 
@@ -372,27 +366,27 @@ def log_qa_call(
 # Gemini caller
 # ---------------------------------------------------------------------------
 
-def parse_sentiment(text: str) -> float:
-    """Extract sentiment score from model response."""
-    text_upper = text.upper()
-    if 'BULLISH' in text_upper[-100:]:
-        return 0.8
-    elif 'BEARISH' in text_upper[-100:]:
-        return -0.8
-    else:
-        return 0.0
-
-
-def parse_key_themes(text: str) -> list:
-    """Extract bullet point themes from model response."""
+def parse_response(text: str) -> tuple[str, float, list]:
+    """Parse the new format with explicit SENTIMENT: and THEMES: tags."""
+    narrative_lines = []
+    sentiment_score = 0.0
     themes = []
+    
     for line in text.split('\n'):
-        line = line.strip()
-        if line.startswith(('- ', '* ', '• ')) or (len(line) > 3 and line[0].isdigit() and line[1] == '.'):
-            theme = line.lstrip('-*•0123456789. ').strip()
-            if theme and len(theme) > 10:
-                themes.append(theme)
-    return themes[:5]
+        if line.startswith('SENTIMENT:'):
+            val = line.split(':', 1)[1].strip().upper()
+            if 'BULLISH' in val:
+                sentiment_score = 0.8
+            elif 'BEARISH' in val:
+                sentiment_score = -0.8
+        elif line.startswith('THEMES:'):
+            val = line.split(':', 1)[1].strip()
+            themes = [t.strip() for t in val.split(',')]
+        else:
+            narrative_lines.append(line)
+            
+    narrative = '\n'.join(narrative_lines).strip()
+    return narrative, sentiment_score, themes[:5]
 
 
 def call_gemini(prompt: str, dry_run: bool = False) -> Dict[str, Any]:
@@ -401,7 +395,7 @@ def call_gemini(prompt: str, dry_run: bool = False) -> Dict[str, Any]:
         logger.info("DRY RUN — Gemini not called. Prompt preview:")
         logger.info(prompt[:500] + "...")
         return {
-            'text': "[DRY RUN] This is a simulated briefing. The market shows moderate stress with rising foreclosure search trends and elevated home insurance costs, suggesting buyers should approach with caution in high-cost metros. NEUTRAL",
+            'text': "[DRY RUN] This is a simulated briefing. The market shows moderate stress with rising foreclosure search trends and elevated home insurance costs, suggesting buyers should approach with caution in high-cost metros.\nSENTIMENT: NEUTRAL\nTHEMES: Cautious buyers, High rates",
             'token_count': 0,
         }
 
@@ -413,7 +407,7 @@ def call_gemini(prompt: str, dry_run: bool = False) -> Dict[str, Any]:
         model = GenerativeModel(GEMINI_MODEL)
 
         config = GenerationConfig(
-            max_output_tokens=600,
+            max_output_tokens=2500,
             temperature=0.4,
         )
         response = model.generate_content(prompt, generation_config=config)
@@ -461,17 +455,16 @@ def generate_briefing(audience: str, dry_run: bool = False) -> Dict[str, Any]:
     text = result['text']
     token_count = result['token_count']
 
-    sentiment_score = parse_sentiment(text)
-    key_themes = parse_key_themes(text)
+    narrative, sentiment_score, key_themes = parse_response(text)
     csi = context.get('composite_stress_index')
 
     if not dry_run:
-        store_briefing(client, audience, text, sentiment_score, key_themes, csi, context, token_count)
+        store_briefing(client, audience, narrative, sentiment_score, key_themes, csi, context, token_count)
 
     qa_count = get_qa_count_today(client) if not dry_run else 0
 
     return {
-        'narrative': text,
+        'narrative': narrative,
         'sentiment_score': sentiment_score,
         'key_themes': key_themes,
         'composite_stress_index': csi,

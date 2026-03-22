@@ -6,7 +6,7 @@
 CREATE TABLE IF NOT EXISTS `{project_id}.{dataset_id}.ai_insights` (
     generated_date DATE NOT NULL,
     audience_type STRING NOT NULL,         -- homebuyer | re_investor | reit_investor
-    narrative TEXT,                        -- Full AI-generated briefing text
+    narrative STRING,                        -- Full AI-generated briefing text
     sentiment_score FLOAT64,              -- -1.0 (bearish) to 1.0 (bullish)
     key_themes JSON,                       -- Array of theme strings
     composite_stress_index FLOAT64,       -- CSI at time of generation (0-100)
