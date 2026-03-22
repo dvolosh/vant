@@ -35,7 +35,6 @@ Thumbs.db
 
 # Project specific - exclude web and data_engine from dashboard deployment
 web/
-data_engine/
 
 # Exclude data files EXCEPT uscities.csv (needed for dashboard)
 *.xlsx

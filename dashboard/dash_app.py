@@ -610,16 +610,20 @@ def fetch_trends_data():
         search_term,
         category,
         avg_interest_score,
-        region
+        region,
+        updated_at
     FROM `{client.project}.{dataset_id}.google_search_trends`
     ORDER BY search_term, week_start_date
     """
     
     try:
         df = client.query(query).to_dataframe()
-        # Ensure week_start_date is parsed as datetime
-        if not df.empty and 'week_start_date' in df.columns:
-            df['week_start_date'] = pd.to_datetime(df['week_start_date'])
+        # Ensure week_start_date and updated_at are parsed as datetime
+        if not df.empty:
+            if 'week_start_date' in df.columns:
+                df['week_start_date'] = pd.to_datetime(df['week_start_date'])
+            if 'updated_at' in df.columns:
+                df['updated_at'] = pd.to_datetime(df['updated_at'])
         return df
     except Exception as e:
         print(f"Error fetching Google Trends data: {e}")
@@ -1699,10 +1703,10 @@ def update_csi_charts(trends_json):
     )
 
     # Freshness bar
-    last_date = df['week_start_date'].max()
+    last_fetch_date = df['updated_at'].max() if 'updated_at' in df.columns else df['week_start_date'].max()
     freshness = [
         html.Span('📡', style={'marginRight': '0.4rem'}),
-        html.Span(f'Trends last updated: {last_date.strftime("%b %d, %Y")}',
+        html.Span(f'Trends Data Fetched: {last_fetch_date.strftime("%b %d, %Y")}',
                   style={'marginRight': '2rem'}),
         html.Span(f'CSI: {current_csi:.1f} / 100 — {stress_label}',
                   style={'color': bar_color, 'fontWeight': '600'}),

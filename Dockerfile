@@ -11,13 +11,15 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements first for better caching
-COPY dashboard/requirements.txt .
+COPY dashboard/requirements.txt dashboard/
+COPY data_engine/requirements.txt data_engine/
 
 # Install Python dependencies
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -r dashboard/requirements.txt
 
-# Copy the entire dashboard application (now self-contained)
-COPY dashboard/ .
+# Copy the entire dashboard and data_engine application
+COPY dashboard/ dashboard/
+COPY data_engine/ data_engine/
 
 # Set environment variables
 ENV PORT=8080
@@ -26,5 +28,6 @@ ENV PYTHONUNBUFFERED=1
 # Expose port
 EXPOSE 8080
 
-# Run the application with gunicorn
+# Run the application with gunicorn from the dashboard directory
+WORKDIR /app/dashboard
 CMD exec gunicorn --bind :$PORT --workers 2 --threads 4 --timeout 0 dash_app:server
