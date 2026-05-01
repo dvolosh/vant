@@ -1,8 +1,23 @@
 "use client";
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
+import { getLiveSentiment } from '../app/actions';
 
 const Ticker = () => {
+    const [data, setData] = useState<any>(null);
+
+    useEffect(() => {
+        const fetchLive = async () => {
+            const result = await getLiveSentiment();
+            if (result) {
+                setData(result);
+            }
+        };
+        fetchLive();
+    }, []);
+
+    const isLoading = !data;
+    
     return (
         <section style={{ background: 'linear-gradient(to bottom, #000, #080808)', padding: '6rem 0' }}>
             <div className="container">
@@ -31,20 +46,25 @@ const Ticker = () => {
                             style={{ flex: 1, paddingRight: '2rem', borderRight: '1px solid rgba(255,255,255,0.1)' }}
                         >
                             <h3 style={{ color: '#666', textTransform: 'uppercase', fontSize: '0.75rem', letterSpacing: '0.1em', marginBottom: '1.5rem' }}>
-                                National Buyer Sentiment
+                                Composite Stress Index
                             </h3>
                             <div style={{ display: 'flex', alignItems: 'baseline', gap: '1rem', marginBottom: '0.5rem' }}>
                                 <div style={{
                                     fontSize: '2.5rem',
                                     fontWeight: '700',
-                                    color: '#ffdd00',
-                                    textShadow: '0 0 20px rgba(255, 221, 0, 0.3)'
+                                    color: isLoading ? '#666' : data.color,
+                                    textShadow: isLoading ? 'none' : `0 0 20px ${data.color}40`,
+                                    transition: 'color 0.5s ease'
                                 }}>
-                                    ANXIOUS
+                                    {isLoading ? 'LOADING...' : `${data.score} (${data.sentiment})`}
                                 </div>
                             </div>
-                            <span style={{ color: '#ffdd00', fontSize: '1rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                                <span style={{ fontSize: '1.2rem' }}>▼</span> 15% WoW
+                            <span style={{ color: isLoading ? '#666' : data.diffColor, fontSize: '1rem', display: 'flex', alignItems: 'center', gap: '0.5rem', transition: 'color 0.5s ease' }}>
+                                {!isLoading && (
+                                    <>
+                                        <span style={{ fontSize: '1.2rem' }}>{data.diffSign}</span> {data.diffText}
+                                    </>
+                                )}
                             </span>
                         </motion.div>
 
@@ -56,25 +76,25 @@ const Ticker = () => {
                             style={{ flex: 2 }}
                         >
                             <h3 style={{ color: '#666', textTransform: 'uppercase', fontSize: '0.75rem', letterSpacing: '0.1em', marginBottom: '1.5rem' }}>
-                                Primary Friction Points (Live)
+                                Primary Stress Drivers (Live)
                             </h3>
                             <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                                {[
-                                    { label: 'Interest Rate Spike', severity: 'high' },
-                                    { label: 'Insurance Premiums', severity: 'med' },
-                                    { label: 'Inventory Stagnation', severity: 'med' }
-                                ].map((item, i) => (
-                                    <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-                                        <span style={{
-                                            width: '8px',
-                                            height: '8px',
-                                            borderRadius: '50%',
-                                            background: item.severity === 'high' ? '#ff4444' : '#ff9944',
-                                            boxShadow: `0 0 8px ${item.severity === 'high' ? '#ff4444' : '#ff9944'}`
-                                        }}></span>
-                                        <span style={{ color: '#ccc', fontSize: '1rem' }}>{item.label}</span>
-                                    </div>
-                                ))}
+                                {isLoading ? (
+                                    <div style={{ color: '#666' }}>Fetching live data...</div>
+                                ) : (
+                                    data.frictionPoints.map((item: any, i: number) => (
+                                        <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                                            <span style={{
+                                                width: '8px',
+                                                height: '8px',
+                                                borderRadius: '50%',
+                                                background: item.color,
+                                                boxShadow: `0 0 8px ${item.color}`
+                                            }}></span>
+                                            <span style={{ color: '#ccc', fontSize: '1rem' }}>{item.label}</span>
+                                        </div>
+                                    ))
+                                )}
                             </div>
                         </motion.div>
                     </div>
