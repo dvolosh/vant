@@ -118,8 +118,8 @@ export async function getLiveSentiment() {
             diffColor,
             frictionPoints: sortedFriction
         };
-    } catch (e) {
+    } catch (e: any) {
         console.error("Error fetching live sentiment:", e);
-        return null;
+        return { error: e.message || String(e) };
     }
 }

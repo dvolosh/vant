@@ -56,14 +56,17 @@ const Ticker = () => {
                                     textShadow: isLoading ? 'none' : `0 0 20px ${data.color}40`,
                                     transition: 'color 0.5s ease'
                                 }}>
-                                    {isLoading ? 'LOADING...' : `${data.score} (${data.sentiment})`}
+                                    {isLoading ? 'LOADING...' : data.error ? 'ERROR' : `${data.score} (${data.sentiment})`}
                                 </div>
                             </div>
-                            <span style={{ color: isLoading ? '#666' : data.diffColor, fontSize: '1rem', display: 'flex', alignItems: 'center', gap: '0.5rem', transition: 'color 0.5s ease' }}>
-                                {!isLoading && (
+                            <span style={{ color: isLoading ? '#666' : data.diffColor || '#ff4444', fontSize: '1rem', display: 'flex', alignItems: 'center', gap: '0.5rem', transition: 'color 0.5s ease' }}>
+                                {!isLoading && !data.error && (
                                     <>
                                         <span style={{ fontSize: '1.2rem' }}>{data.diffSign}</span> {data.diffText}
                                     </>
+                                )}
+                                {!isLoading && data.error && (
+                                    <span style={{ fontSize: '0.8rem', color: '#ff4444', maxWidth: '300px' }}>{data.error}</span>
                                 )}
                             </span>
                         </motion.div>
@@ -81,6 +84,8 @@ const Ticker = () => {
                             <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
                                 {isLoading ? (
                                     <div style={{ color: '#666' }}>Fetching live data...</div>
+                                ) : data.error ? (
+                                    <div style={{ color: '#ff4444' }}>Failed to fetch data</div>
                                 ) : (
                                     data.frictionPoints.map((item: any, i: number) => (
                                         <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
