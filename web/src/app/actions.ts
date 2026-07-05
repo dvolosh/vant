@@ -4,8 +4,24 @@ import { BigQuery } from '@google-cloud/bigquery';
 
 export async function getLiveSentiment() {
     try {
-        const bigquery = new BigQuery({ projectId: 'vant-486316' });
-        
+        let options: any = { projectId: 'vant-486316' };
+
+        if (process.env.GCP_SERVICE_ACCOUNT_KEY) {
+            try {
+                const keyStr = process.env.GCP_SERVICE_ACCOUNT_KEY;
+                const parsedKey = keyStr.startsWith('{') ? JSON.parse(keyStr) : JSON.parse(Buffer.from(keyStr, 'base64').toString('utf-8'));
+
+                options.credentials = {
+                    client_email: parsedKey.client_email,
+                    private_key: parsedKey.private_key?.replace(/\\n/g, '\n'),
+                };
+            } catch (err) {
+                console.error("Failed to parse GCP_SERVICE_ACCOUNT_KEY", err);
+            }
+        }
+
+        const bigquery = new BigQuery(options);
+
         // Calculate composite stress index logic identical to dashboard
         const query = `
             WITH latest_weeks AS (
@@ -42,16 +58,16 @@ export async function getLiveSentiment() {
             FROM normalized
             ORDER BY week_start_date DESC, search_term
         `;
-        
+
         const [rows] = await bigquery.query({ query });
-        
+
         if (!rows || rows.length === 0) {
             return null;
         }
 
         // Group by week
         const weeks = [...new Set(rows.map(r => r.week_start_date.value))].sort().reverse();
-        
+
         const currentWeekRows = rows.filter(r => r.week_start_date.value === weeks[0]);
         const previousWeekRows = rows.filter(r => r.week_start_date.value === weeks[1]);
 
@@ -73,7 +89,7 @@ export async function getLiveSentiment() {
 
         const currentScore = calcScore(currentWeekRows);
         const prevScore = calcScore(previousWeekRows);
-        
+
         let sentiment = "NEUTRAL";
         let color = "#aaa";
         if (currentScore >= 60) {
